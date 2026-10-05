@@ -1,0 +1,24 @@
+/* Keep the current image's full composition throughout every transition. */
+.frame-outgoing{pointer-events:none}
+.project-dialog::backdrop{background:rgb(12 19 13 / calc(.85 * var(--dialog-progress, 1)))}
+.detail-outgoing{position:fixed;inset:0;z-index:2;overflow:hidden;pointer-events:none;background:var(--paper)}
+.project-pagination{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr);background:var(--accent)}
+.project-pagination a{min-width:0;gap:1.5rem;padding:2.5rem clamp(1.25rem,4vw,4rem)}
+.project-pagination h3{overflow-wrap:anywhere}
+.previous-project{display:flex;align-items:center;border-right:1px solid #20272130}
+.previous-project>.mono,.previous-project .mono{font-size:.7rem}
+.previous-project h3{font-size:clamp(1.1rem,2.4vw,2rem);letter-spacing:-.04em;margin-top:.7rem}
+.previous-project>span{font-size:1.8rem}
+.project-pagination a>span{transition:transform .25s ease-out}
+.project-pagination .next-project:hover>span{transform:translate(3px,-3px)}
+.previous-project:hover>span{transform:translateX(-4px)}
+@media(max-width:700px){
+  .project-pagination{grid-template-columns:1fr}
+  .project-pagination a{padding:1.5rem var(--gutter)}
+  .previous-project{border-right:0;border-bottom:1px solid #20272130}
+  .previous-project h3{font-size:1.15rem}
+}
+@media(prefers-reduced-motion:reduce){
+  .frame-outgoing,.detail-outgoing{display:none}
+  .project-pagination a>span{transform:none!important}
+}

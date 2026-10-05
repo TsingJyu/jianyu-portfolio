@@ -16,6 +16,29 @@
   let lastTrigger = null;
   let menuOpen = false;
   let dialogWanted = false;
+  const transitions = new Set();
+  const detail = $('#project-detail');
+  let detailTransition = null;
+
+  // Decorative layers never intercept input. Every transition can be finished
+  // immediately when the viewer changes their motion preference.
+  function animate(element, keyframes, options, cleanup = () => {}) {
+    if (motion.matches || !element.animate) { cleanup(); return null; }
+    const animation = element.animate(keyframes, options);
+    transitions.add(animation);
+    const release = () => { transitions.delete(animation); cleanup(); };
+    animation.addEventListener('finish', release, {once:true});
+    animation.addEventListener('cancel', release, {once:true});
+    return animation;
+  }
+  function decorativeCopy(element) {
+    const copy = element.cloneNode(true);
+    copy.removeAttribute('id');
+    $$('[id]', copy).forEach(node => node.removeAttribute('id'));
+    copy.setAttribute('aria-hidden', 'true');
+    copy.inert = true;
+    return copy;
+  }
 
   // A critically damped spring retargets from its current position AND velocity.
   // Rapid reversals never restart from the previous destination.
@@ -53,9 +76,13 @@
   });
   const dialogSpring = spring(value => {
     projectDialog.style.opacity = value;
-    projectDialog.style.transform = `translateY(${(1 - value) * 32}px)`;
+    projectDialog.style.transform = `translateY(${(1 - value) * 56}px)`;
+    projectDialog.style.setProperty('--dialog-progress', value);
   });
-  motion.addEventListener('change', () => { if (motion.matches) { menuSpring.finish(); dialogSpring.finish(); } });
+  motion.addEventListener('change', () => { if (motion.matches) {
+    menuSpring.finish(); dialogSpring.finish();
+    [...transitions].forEach(animation => animation.finish());
+  } });
 
   const imageMarkup = (image, options = {}) => {
     const {sizes = '(max-width: 700px) 92vw, 48vw', eager = false} = options;
@@ -166,16 +193,22 @@
     preload.onload = () => {
       if (request !== frameRequest) return;
       const image = $('#hero-image');
-      image.getAnimations().forEach(animation => animation.cancel());
+      if (image.getAttribute('src') === item.image.src) return;
+      const visual = $('.hero-visual:not(.frame-outgoing)');
+      if (!motion.matches) {
+        const outgoing = decorativeCopy(visual);
+        outgoing.classList.add('frame-outgoing');
+        visual.after(outgoing);
+        animate(outgoing, [{opacity:1}, {opacity:0}], {duration:480, easing:'cubic-bezier(.22,.61,.36,1)'}, () => outgoing.remove());
+      }
       image.src = item.image.src; image.alt = item.image.alt;
-      $('.hero-visual').style.setProperty('--hero-background', `url("${item.image.src}")`);
+      visual.style.setProperty('--hero-background', `url("${item.image.src}")`);
       const feature = $('.hero-feature');
       feature.href = projectLink(item.project);
       $('.mono', feature).textContent = `IN FOCUS — ${item.project.number}`;
       $('.feature-name', feature).innerHTML = `${escape(item.titleZh)} <i>${escape(item.title)}</i> <span aria-hidden="true">↗</span>`;
       $('.feature-type', feature).textContent = item.type;
       $('.hero-image-caption').textContent = `${item.title.toUpperCase()} / ${item.titleZh}`;
-      if (!motion.matches) image.animate([{opacity:.5},{opacity:1}],{duration:250,easing:'ease-out'});
       $$('.frame-button').forEach(frame => { const active = frame === button; frame.classList.toggle('is-active', active); frame.setAttribute('aria-pressed', String(active)); });
     };
     preload.src = item.image.src;
@@ -183,21 +216,49 @@
 
   function detailMarkup(project) {
     const next = projects[(projects.indexOf(project) + 1) % projects.length];
+    const previous = projects[(projects.indexOf(project) - 1 + projects.length) % projects.length];
     const facts = [['TYPE / 類別', project.type], ['PERIOD / 時間', project.period], ['ROLE / 職責', project.role], ['CLIENT / 機構', project.client], ['LOCATION / 地點', project.location], ['STATUS / 狀態', project.status]].filter(([, value]) => value);
     return `<header class="detail-header"><p class="mono">SELECTED WORK / ${escape(project.number)} — ${escape(project.type).toUpperCase()}</p><h2 id="project-title" tabindex="-1">${escape(project.title)}</h2><p class="detail-title-zh">${escape(project.titleZh)}</p></header>
       ${project.id === 'shandong' ? `<a href="${escape(project.links[0].url)}" target="_blank" rel="noopener noreferrer" aria-label="觀看嶺南大學山東交流團紀錄片（另開視窗）">` : ''}<img class="detail-hero" src="${escape(project.cover.src)}" alt="${escape(project.cover.alt)}" width="${project.cover.width}" height="${project.cover.height}">${project.id === 'shandong' ? '</a>' : ''}
       <div class="detail-info"><dl class="detail-facts">${facts.map(([key,value]) => `<div><dt>${key}</dt><dd>${escape(value)}</dd></div>`).join('')}</dl><div class="detail-copy">${project.description ? `<p>${escape(project.description).replace(/\n/g,'<br>')}</p>` : ''}${project.metrics ? `<p class="detail-metric">${escape(project.metrics)}</p>` : ''}${project.awards?.length ? `<ul class="detail-awards">${project.awards.map(award => `<li><strong>${escape(award.event)}</strong><span>${escape(award.result)}</span></li>`).join('')}</ul>` : ''}${project.links?.length ? `<div class="detail-links">${project.links.map(link => externalLink(link)).join('')}</div>` : ''}${project.note ? `<p class="detail-note">${escape(project.note)}</p>` : ''}</div></div>
       <div class="gallery-header mono"><span>PROJECT GALLERY / 作品圖集</span><span>CLICK TO EXPLORE · 點擊放大</span></div>
       <div class="detail-gallery">${project.images.map((image,index) => `<figure class="gallery-item ${image.kind === 'poster' ? 'is-poster' : ''}"><button class="gallery-image-button" data-image="${index}" aria-label="放大：${escape(image.alt)}">${imageMarkup(image)}</button><figcaption>${String(index+1).padStart(2,'0')} / ${escape(image.alt)}</figcaption></figure>`).join('')}</div>
-      <a class="next-project" href="${projectLink(next)}"><div><p class="mono">NEXT PERSPECTIVE / 下一件作品</p><h3>${escape(next.title)}</h3></div><span aria-hidden="true">↗</span></a>`;
+      <nav class="project-pagination" aria-label="瀏覽其他作品"><a class="previous-project" data-direction="-1" href="${projectLink(previous)}"><span aria-hidden="true">←</span><div><p class="mono">PREVIOUS / 上一件作品</p><h3>${escape(previous.title)}</h3></div></a><a class="next-project" data-direction="1" href="${projectLink(next)}"><div><p class="mono">NEXT PERSPECTIVE / 下一件作品</p><h3>${escape(next.title)}</h3></div><span aria-hidden="true">↗</span></a></nav>`;
   }
-  function openProject(project) {
+  function replaceDetail(project, direction) {
+    // Preserve the visible outgoing viewport while the next project is rendered
+    // immediately. The toolbar stays usable throughout, including rapid Close.
+    let outgoing;
+    if (projectDialog.open && activeProject && !motion.matches) {
+      const bounds = detail.getBoundingClientRect();
+      const dialogBounds = projectDialog.getBoundingClientRect();
+      outgoing = document.createElement('div');
+      outgoing.className = 'detail-outgoing';
+      outgoing.setAttribute('aria-hidden', 'true'); outgoing.inert = true;
+      const copy = decorativeCopy(detail);
+      copy.style.position = 'absolute';
+      copy.style.top = `${bounds.top - dialogBounds.top}px`;
+      copy.style.width = `${bounds.width}px`;
+      copy.style.opacity = getComputedStyle(detail).opacity;
+      outgoing.append(copy);
+    }
+    detailTransition?.cancel();
+    $$('.detail-outgoing', projectDialog).forEach(node => node.remove());
+    activeProject = project;
+    detail.innerHTML = detailMarkup(project);
+    $$('.gallery-image-button', detail).forEach(button => button.addEventListener('click', () => openImage(Number(button.dataset.image))));
+    projectDialog.scrollTop = 0;
+    if (outgoing) {
+      projectDialog.append(outgoing);
+      animate(outgoing, [{opacity:1,transform:'translateY(0)'},{opacity:0,transform:`translateY(${-direction * 20}px)`}], {duration:320,easing:'cubic-bezier(.4,0,.2,1)'}, () => outgoing.remove());
+      detailTransition = animate(detail, [{opacity:0,transform:`translateY(${direction * 28}px)`},{opacity:1,transform:'translateY(0)'}], {duration:520,easing:'cubic-bezier(.16,1,.3,1)'});
+    }
+  }
+  function openProject(project, direction = 1) {
     dialogWanted = true;
     if (activeProject?.id !== project.id) {
-      activeProject = project;
-      $('#project-detail').innerHTML = detailMarkup(project);
-      $$('.gallery-image-button', projectDialog).forEach(button => button.addEventListener('click', () => openImage(Number(button.dataset.image))));
-      projectDialog.scrollTop = 0;
+      if (lightbox.open) lightbox.close();
+      replaceDetail(project, direction);
     }
     setMenu(false);
     if (!projectDialog.open) { document.body.classList.add('is-locked'); projectDialog.showModal(); }
@@ -206,6 +267,8 @@
   }
   function hideProject() {
     dialogWanted = false;
+    detailTransition?.cancel();
+    $$('.detail-outgoing', projectDialog).forEach(node => node.remove());
     if (lightbox.open) lightbox.close();
     if (!projectDialog.open) return;
     dialogSpring.to(0, () => {
@@ -215,8 +278,10 @@
     });
   }
   function closeProject() {
+    if (!dialogWanted) return;
+    hideProject();
     if (history.state?.portfolioProject) history.back();
-    else { history.replaceState(null, '', '#work'); hideProject(); }
+    else history.replaceState(null, '', '#work');
   }
   document.addEventListener('click', event => {
     const link = event.target.closest('a[href^="#project/"]');
@@ -228,7 +293,7 @@
       lastTrigger = link;
       history.pushState({portfolioProject:true},'',projectLink(project));
     } else history.replaceState(history.state, '', projectLink(project));
-    openProject(project);
+    openProject(project, Number(link.dataset.direction) || 1);
   });
   $('#close-project').addEventListener('click', closeProject);
   $('#dialog-back').addEventListener('click', event => { event.preventDefault(); closeProject(); });
@@ -250,7 +315,11 @@
     $('#previous-image').disabled = activeImage === 0;
     $('#next-image').disabled = activeImage === activeProject.images.length - 1;
   }
-  function openImage(index) { activeImage = index; updateImage(); lightbox.showModal(); $('#close-lightbox').focus(); }
+  function openImage(index) {
+    activeImage = index; updateImage(); lightbox.showModal(); $('#close-lightbox').focus();
+    lightbox.getAnimations().forEach(animation => animation.cancel());
+    animate(lightbox, [{opacity:0},{opacity:1}], {duration:240,easing:'ease-out'});
+  }
   function stepImage(step) { if (!activeProject) return; activeImage = Math.max(0, Math.min(activeProject.images.length-1, activeImage+step)); updateImage(); }
   $('#close-lightbox').addEventListener('click', () => lightbox.close());
   $('#previous-image').addEventListener('click', () => stepImage(-1));
